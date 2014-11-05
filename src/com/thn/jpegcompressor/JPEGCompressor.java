@@ -6,46 +6,77 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+
+import org.apache.log4j.Logger;
 
 import com.sun.media.jai.codec.FileSeekableStream;
 import com.sun.media.jai.codec.JPEGEncodeParam;
 import com.sun.media.jai.codecimpl.JPEGImageEncoder;
 
-public class JPEGCompressor implements FileOperator
+public class JPEGCompressor
 {
-    private static final Pattern INCLUDE_JPG_PATTERN = Pattern.compile("(.*)(\\.jpg)$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern EXCLUDE_JPG_PATTERN = Pattern.compile("(.*_s)(\\.jpg)$", Pattern.CASE_INSENSITIVE);
-    private static final long MIN_SIZE_IN_KB = 530;
+    private static final Logger LOGGER = Logger.getLogger(JPEGCompressor.class);
 
-    private CompressRetryPolicy mRetryPolicy;
-    private MyLogger mLogger;
     private final File mTempDirectory;
 
-    public JPEGCompressor(MyLogger aLogger, File aTempDirectory)
+    public JPEGCompressor(File aTempDirectory)
     {
-        mLogger = aLogger;
         mTempDirectory = aTempDirectory;
     }
 
-    @Override
-    public boolean accept(File aFile)
+    public void execute(File aFile)
     {
+        try {
+            LOGGER.info(aFile.getAbsolutePath() + " (" + aFile.length() + ")");
+            File outFile = new File(getNewFileName(aFile));
+            // copy file to transform to temp directory
+            File tempOrigFile = new File(mTempDirectory, aFile.getName());
+            File tempDestFile = new File(mTempDirectory, outFile.getName());
+            copyFile(aFile, tempOrigFile);
+            
+            CompressRetryPolicy retryPolicy = new AdaptivePolicy();
+            float quality;
+            do
+            {
+                quality = retryPolicy.computeQuality(tempOrigFile);
+                compressJPEG(tempOrigFile, tempDestFile, quality);
+            }
+            while (retryPolicy.mustRetry(tempOrigFile, tempDestFile, quality));
 
-        if (aFile.isDirectory())
-        {
-            return false;
+            // copy EXIF data
+            ExifUtil.copyExifData(tempOrigFile, tempDestFile);
+
+            copyFile(tempDestFile, outFile);
+            // delete original files
+            boolean success = aFile.delete();
+            if (!success)
+            {
+                throw new IllegalStateException("could not delete file " + aFile.getAbsolutePath());
+            }
+            success = tempOrigFile.delete();
+            if (!success)
+            {
+                throw new IllegalStateException("could not delete file " + tempOrigFile.getAbsolutePath());
+            }
+            success = tempDestFile.delete();
+            if (!success)
+            {
+                throw new IllegalStateException("could not delete file " + tempDestFile.getAbsolutePath());
+            }
+        } catch (IOException | RuntimeException e) {
+            LOGGER.error("Could not process file: " + aFile, e);
         }
-        // only jpg files and don't process the same file twice
-        if (!fileNameAccept(aFile.getAbsolutePath()))
-        {
-            return false;
-        }
-        return aFile.length() > MIN_SIZE_IN_KB * 1024;
     }
 
-    public void compressJPEG(File aInFile, File aOutFile, float aQuality) throws IOException
+    private static void copyFile(File aSourceFile, File aDestFile) throws IOException
+    {
+        Files.copy(aSourceFile.toPath(), aDestFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void compressJPEG(File aInFile, File aOutFile, float aQuality) throws IOException
     {
         javax.media.jai.PlanarImage image;
         // use a stream instead of a file. When using a stream, we can close the stream later when
@@ -55,7 +86,7 @@ public class JPEGCompressor implements FileOperator
         FileSeekableStream fss = new FileSeekableStream(aInFile);
         image = javax.media.jai.JAI.create("stream", fss);
         JPEGEncodeParam encodeParam = new JPEGEncodeParam();
-        mLogger.log("Quality for: " + aInFile + " (" + aInFile.length() + "): " + aQuality);
+        LOGGER.info("Quality for: " + aInFile + " (" + aInFile.length() + "): " + aQuality);
         encodeParam.setQuality(aQuality);
         BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(aOutFile));
         JPEGImageEncoder encoder = new JPEGImageEncoder(out, encodeParam);
@@ -65,83 +96,11 @@ public class JPEGCompressor implements FileOperator
         out.close();
     }
 
-    private static void copyFile(File aSourceFile, File aDestFile) throws IOException
-    {
-        // Create channel on the source
-        FileChannel srcChannel = new FileInputStream(aSourceFile).getChannel();
-
-        // Create channel on the destination
-        FileChannel dstChannel = new FileOutputStream(aDestFile).getChannel();
-
-        // Copy file contents from source to destination
-        dstChannel.transferFrom(srcChannel, 0, srcChannel.size());
-
-        // Close the channels
-        srcChannel.close();
-        dstChannel.close();
-    }
-
-    @Override
-    public void execute(File aFile) throws IOException
-    {
-        mLogger.log(aFile.getAbsolutePath() + " (" + aFile.length() + ")");
-        File outFile = new File(getNewFileName(aFile));
-        // copy file to transform to temp directory
-        File tempOrigFile = new File(mTempDirectory, aFile.getName());
-        File tempDestFile = new File(mTempDirectory, outFile.getName());
-        copyFile(aFile, tempOrigFile);
-        
-        mRetryPolicy = new AdaptivePolicy(mLogger);
-        float quality;
-        do
-        {
-            quality = mRetryPolicy.computeQuality(tempOrigFile);
-            compressJPEG(tempOrigFile, tempDestFile, quality);
-        }
-        while (mRetryPolicy.mustRetry(tempOrigFile, tempDestFile, quality));
-
-        // copy EXIF data
-        ExifUtil.copyExifData(tempOrigFile, tempDestFile);
-
-        copyFile(tempDestFile, outFile);
-        // delete original files
-        boolean success = aFile.delete();
-        if (!success)
-        {
-            throw new IllegalStateException("could not delete file " + aFile.getAbsolutePath());
-        }
-        success = tempOrigFile.delete();
-        if (!success)
-        {
-            throw new IllegalStateException("could not delete file " + tempOrigFile.getAbsolutePath());
-        }
-        success = tempDestFile.delete();
-        if (!success)
-        {
-            throw new IllegalStateException("could not delete file " + tempDestFile.getAbsolutePath());
-        }
-    }
-
-    private static boolean fileNameAccept(String aAbsolutePath)
-    {
-        Matcher m = INCLUDE_JPG_PATTERN.matcher(aAbsolutePath);
-        if (!m.matches())
-        {
-            return false;
-        }
-        m = EXCLUDE_JPG_PATTERN.matcher(aAbsolutePath);
-        if (m.matches())
-        {
-            return false;
-        }
-        return true;
-    }
-
     private static String getNewFileName(File aFile)
     {
         String absolutePath = aFile.getAbsolutePath();
 
-        Matcher m = INCLUDE_JPG_PATTERN.matcher(absolutePath);
+        Matcher m = JPEGFileVisitor.INCLUDE_JPG_PATTERN.matcher(absolutePath);
         if (!m.matches())
         {
             throw new IllegalStateException(aFile + " should not have been selected by the file filter");

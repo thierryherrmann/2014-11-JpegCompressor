@@ -2,24 +2,20 @@ package com.thn.jpegcompressor;
 
 import java.io.File;
 
+import org.apache.log4j.Logger;
+
 public class AdaptivePolicy implements CompressRetryPolicy
 {
+    private static final Logger LOGGER = Logger.getLogger(AdaptivePolicy.class);
     enum State { ITERATING, COMPUTE_LOW_QUALITY, FINAL }
     
     private static final int TARGET_SIZE_IN_K = 500;
     private static final int TARGET_TOLERANCE = 40;
 
-//    private int mQualityPercent = 100;
     private int mQualityPercent = 80;
     private State mState = State.ITERATING;
     private long mSizeForHighQuality;
     private long mSizeForLowQuality;
-    private MyLogger mLogger;
-
-    public AdaptivePolicy(MyLogger aLogger)
-    {
-        mLogger = aLogger;
-    }
 
     @Override
     public float computeQuality(File aInputFile)
@@ -52,7 +48,6 @@ public class AdaptivePolicy implements CompressRetryPolicy
              */
             
             int correction = 75;
-        //    float a = 65 / (mSizeForHighQuality - mSizeForLowQuality);
             float b = 75 - mSizeForHighQuality  * ((float) 65) / (mSizeForHighQuality - mSizeForLowQuality);
             mQualityPercent = Math.round((TARGET_SIZE_IN_K + correction) * 1000 * 65 / (mSizeForHighQuality - mSizeForLowQuality) + b);
             return mQualityPercent / 100f;
@@ -68,7 +63,7 @@ public class AdaptivePolicy implements CompressRetryPolicy
         {
             if (outputLengthInK < TARGET_SIZE_IN_K + TARGET_TOLERANCE)
             {
-                mLogger.log("final length: " + aLastOutputFile.length());
+                LOGGER.info("final length: " + aLastOutputFile.length());
                 return false;
             }
             if (mQualityPercent == 75)
@@ -86,7 +81,7 @@ public class AdaptivePolicy implements CompressRetryPolicy
         }
         if (State.FINAL == mState)
         {
-            mLogger.log("final length: " + aLastOutputFile.length());
+            LOGGER.info("final length for " + aLastOutputFile + ": " + aLastOutputFile.length());
             return false;
         }
         throw new IllegalStateException("bad state: " + mState);
