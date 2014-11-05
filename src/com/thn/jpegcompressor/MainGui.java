@@ -82,7 +82,7 @@ public class MainGui extends JPanel implements MyLogger
                     try
                     {
                         long now = System.currentTimeMillis();
-                        DirectoryWalker.execute(file, compressor);
+                        DirectoryWalker.execute(mainGui, file, compressor);
                         mainGui.log("finished (" + new Timestamp(System.currentTimeMillis()) + ")");
                         mainGui.log("duration : " + ((System.currentTimeMillis() - now)/1000) + " seconds");
                     }

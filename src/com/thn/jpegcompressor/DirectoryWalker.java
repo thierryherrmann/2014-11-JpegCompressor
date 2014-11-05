@@ -6,7 +6,7 @@ import java.io.IOException;
 
 public class DirectoryWalker
 {
-    public static void execute(File aDirectory, FileOperator aFileOperator) throws IOException
+    public static void execute(MyLogger aLogger, File aDirectory, FileOperator aFileOperator) throws IOException
     {
         if (! aDirectory.exists() || ! aDirectory.isDirectory())
         {
@@ -35,7 +35,8 @@ public class DirectoryWalker
         File[] directories = aDirectory.listFiles(new DirectoryFilter());
         for (File directory : directories)
         {
-            execute(directory, aFileOperator);
+            aLogger.log("scanning dir: " + directory.getAbsolutePath());
+            execute(aLogger, directory, aFileOperator);
         }
     }
     

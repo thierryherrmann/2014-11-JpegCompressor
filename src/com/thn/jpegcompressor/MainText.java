@@ -30,8 +30,9 @@ public class MainText
                 System.err.println("Usage: " + MainText.class.getName() + " <root directory>");
                 System.exit(-1);
             }
-            JPEGCompressor compressor = new JPEGCompressor(new ConsoleMyLogger(), new File("c:/windows/temp"));
-            DirectoryWalker.execute(new File(aArgs[0]), compressor);
+            ConsoleMyLogger logger = new ConsoleMyLogger();
+            JPEGCompressor compressor = new JPEGCompressor(logger, new File("c:/windows/temp"));
+            DirectoryWalker.execute(logger, new File(aArgs[0]), compressor);
         }
         catch (Exception e)
         {
